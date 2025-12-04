@@ -216,7 +216,7 @@ def get_page_data_from_file_path(
         file_path = Path(file_path)
 
     try:
-        with open(file_path) as file_handle:
+        with open(file_path, encoding='utf-8') as file_handle:
             markdown_lines = file_handle.readlines()
     except UnicodeDecodeError:
         with open(file_path, "rb") as file_handle:
