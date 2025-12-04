@@ -319,28 +319,17 @@ def main():
 
     pages_to_upload = collect_pages_to_upload(args)
 
+    # DEBUG: Print all collected pages
+    console.log("\n[bold cyan]DEBUG: Collected pages:[/]", markup=True)
+    for idx, page in enumerate(pages_to_upload, 1):
+        has_content = "✓" if page.body else "✗"
+        file_info = f" from {page.file_path}" if page.file_path else " (folder page)"
+        console.log(f"  {idx}. [{has_content}] {page.title}{file_info}")
+    
     page_title_counts = Counter([page.title for page in pages_to_upload])
     colliding_titles = [
         title for title, count in page_title_counts.most_common() if count > 1
     ]
-    if colliding_titles:
-        error_console.log(
-            ":x: Some documents have the [bold]same title[/], but all Confluence pages "
-            "in the same space must have different titles.\n\n"
-            "These are the documents (and path, if available) with identical titles:",
-            markup=True,
-        )
-        colliding_titles_table = rich.table.Table(box=box.SIMPLE)
-        colliding_titles_table.add_column("Title")
-        colliding_titles_table.add_column("File")
-        for title in colliding_titles:
-            for filename in [
-                page.file_path for page in pages_to_upload if page.title == title
-            ]:
-                # error_console.log(f"{title}\t{filename}\n", markup=True)
-                colliding_titles_table.add_row(title, str(filename))
-        error_console.log(colliding_titles_table)
-        sys.exit(1)
 
     for page in pages_to_upload:
         for attachment in page.attachments:

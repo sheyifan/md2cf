@@ -113,7 +113,28 @@ def get_pages_from_directory(
     base_path = file_path.resolve()
     folder_data = dict()
     git_repo = GitRepository(file_path, use_gitignore=use_gitignore)
+    
+    # Track which markdown files are used as folder content (to skip them later)
+    files_used_as_folder_content = set()
+    
+    # First pass: identify all markdown files that will be used as folder content
+    for current_path, directories, file_names in os.walk(file_path):
+        current_path = Path(current_path).resolve()
+        if git_repo.is_ignored(current_path):
+            continue
+        
+        # For each subdirectory, check if there's a matching markdown file
+        for subdir in directories:
+            subdir_path = current_path / subdir
+            if git_repo.is_ignored(subdir_path):
+                continue
+            
+            # Look for a markdown file with the same stem as the subdirectory
+            potential_file = current_path / f"{subdir}.md"
+            if potential_file.exists() and not git_repo.is_ignored(potential_file):
+                files_used_as_folder_content.add(potential_file.resolve())
 
+    # Second pass: process all files and folders
     for current_path, directories, file_names in os.walk(file_path):
         current_path = Path(current_path).resolve()
 
@@ -130,7 +151,22 @@ def get_pages_from_directory(
             path for path in markdown_files if not git_repo.is_ignored(path)
         ]
 
-        folder_data[current_path] = {"n_files": len(markdown_files)}
+        # Build a set of subdirectory names in the current path
+        subdirs_in_current = {d for d in directories}
+
+        # Check if there's a markdown file at the parent level with matching stem
+        folder_content_file = None
+        if current_path != base_path:
+            # Check if a markdown file with the same stem exists in the parent directory
+            potential_file = current_path.parent / f"{current_path.name}.md"
+            if potential_file.resolve() in files_used_as_folder_content:
+                folder_content_file = potential_file
+
+        folder_data[current_path] = {
+            "n_files": len(markdown_files),
+            "content_file": folder_content_file,
+            "subdirs": subdirs_in_current
+        }
 
         # we'll capture title and path of the parent folder for this folder:
         folder_parent_title = None
@@ -176,6 +212,30 @@ def get_pages_from_directory(
 
         folder_data[current_path]["title"] = folder_title
 
+        # Prepare folder page with content if a matching markdown file exists
+        folder_page_body = ""
+        folder_page_file_path = None
+        folder_page_attachments = []
+        folder_page_relative_links = []
+        
+        if folder_data[current_path]["content_file"]:
+            # Use the content from the matching markdown file
+            content_page = get_page_data_from_file_path(
+                folder_data[current_path]["content_file"],
+                strip_header=strip_header,
+                remove_text_newlines=remove_text_newlines,
+                enable_relative_links=enable_relative_links,
+            )
+            folder_page_body = content_page.body
+            folder_page_file_path = content_page.file_path
+            folder_page_attachments = content_page.attachments
+            folder_page_relative_links = content_page.relative_links
+            # Override folder title with the document title if available
+            if content_page.title:
+                folder_title = content_page.title
+                parent_page_title = content_page.title  # Update parent_page_title for children
+                folder_data[current_path]["title"] = folder_title
+
         if folder_title is not None and (
             markdown_files or (directories and not skip_empty and not collapse_empty)
         ):
@@ -183,11 +243,22 @@ def get_pages_from_directory(
                 Page(
                     title=folder_title,
                     parent_title=folder_parent_title,
-                    body="",
+                    body=folder_page_body,
+                    file_path=folder_page_file_path,
+                    attachments=folder_page_attachments,
+                    relative_links=folder_page_relative_links,
                 )
             )
 
         for markdown_file in markdown_files:
+            # Skip this file if it was already used as the folder's content
+            if folder_data[current_path]["content_file"] == markdown_file:
+                continue
+            
+            # Skip this file if it's being used as content for any folder
+            if markdown_file.resolve() in files_used_as_folder_content:
+                continue
+                
             processed_page = get_page_data_from_file_path(
                 markdown_file,
                 strip_header=strip_header,
