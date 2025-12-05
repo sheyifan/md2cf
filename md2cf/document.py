@@ -1,5 +1,6 @@
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -387,3 +388,245 @@ def get_document_frontmatter(markdown_lines: List[str]) -> Dict[str, Any]:
         frontmatter = {}
 
     return frontmatter
+
+
+class SummaryItem:
+    """Represents an item in the SUMMARY.md file"""
+    
+    def __init__(
+        self,
+        title: str,
+        path: Optional[Path] = None,
+        is_part_title: bool = False,
+        is_separator: bool = False,
+        children: Optional[List["SummaryItem"]] = None,
+    ):
+        self.title = title
+        self.path = path
+        self.is_part_title = is_part_title
+        self.is_separator = is_separator
+        self.children = children if children is not None else []
+    
+    def __repr__(self):
+        return (
+            f"SummaryItem(title={self.title!r}, path={self.path}, "
+            f"is_part_title={self.is_part_title}, children={len(self.children)})"
+        )
+
+
+def parse_summary_md(summary_path: Path) -> List[SummaryItem]:
+    """
+    Parse a mdBook SUMMARY.md file and return a list of SummaryItem objects.
+    
+    :param summary_path: Path to the SUMMARY.md file
+    :return: A list of SummaryItem objects representing the structure
+    """
+    with open(summary_path, encoding='utf-8') as f:
+        lines = f.readlines()
+    
+    summary_dir = summary_path.parent
+    items = []
+    current_part = None  # Track the current Part Title
+    stack = [(items, -1)]  # (current_list, indent_level)
+    in_numbered_section = False
+    
+    # Regex patterns
+    # Matches: - [Title](path) or * [Title](path) or [Title](path)
+    link_pattern = re.compile(r'^(\s*)[-*]?\s*\[([^\]]+)\]\(([^)]*)\)\s*$')
+    # Matches: # Part Title (but not # Summary)
+    part_title_pattern = re.compile(r'^#\s+(.+)$')
+    # Matches: ---
+    separator_pattern = re.compile(r'^-{3,}\s*$')
+    
+    for line in lines:
+        # Skip empty lines
+        if not line.strip():
+            continue
+        
+        # Skip title line (# Summary)
+        if line.strip().startswith('# Summary'):
+            continue
+        
+        # Check for separator
+        if separator_pattern.match(line):
+            continue
+        
+        # Check for part title
+        part_match = part_title_pattern.match(line)
+        if part_match:
+            part_title = part_match.group(1).strip()
+            # Don't skip "Summary" as part title - only as document title
+            item = SummaryItem(title=part_title, is_part_title=True)
+            items.append(item)
+            current_part = item
+            # Reset stack to point to this part's children
+            stack = [(current_part.children, -1)]
+            in_numbered_section = True
+            continue
+        
+        # Check for link (prefix chapter, numbered chapter, or suffix chapter)
+        link_match = link_pattern.match(line)
+        if link_match:
+            indent = link_match.group(1)
+            title = link_match.group(2)
+            path_str = link_match.group(3)
+            
+            # Calculate indent level (2 spaces or 1 tab = 1 level, following mdBook convention)
+            # Convert tabs to 4 spaces first, then count by 2s
+            indent_level = len(indent.replace('\t', '    ')) // 2
+            
+            # Resolve path relative to SUMMARY.md
+            file_path = None
+            if path_str:  # Not a draft chapter
+                file_path = (summary_dir / path_str).resolve()
+            
+            item = SummaryItem(title=title, path=file_path)
+            
+            # Determine if this is a numbered chapter (has list marker)
+            has_list_marker = line.lstrip().startswith(('-', '*'))
+            
+            if has_list_marker:
+                # This is a numbered chapter
+                in_numbered_section = True
+                
+                # Find the appropriate parent based on indent level
+                while len(stack) > 1 and stack[-1][1] >= indent_level:
+                    stack.pop()
+                
+                # Add to current parent's children list
+                current_list = stack[-1][0]
+                current_list.append(item)
+                
+                # Push this item's children list onto stack for potential nested items
+                stack.append((item.children, indent_level))
+            else:
+                # This is a prefix or suffix chapter (no list marker)
+                # Add to top-level items, not to any part
+                items.append(item)
+                current_part = None
+                # Reset stack for non-numbered chapters
+                stack = [(items, -1)]
+                in_numbered_section = False
+    
+    return items
+
+
+def get_pages_from_summary(
+    summary_path: Path,
+    strip_header: bool = False,
+    remove_text_newlines: bool = False,
+    enable_relative_links: bool = False,
+) -> List[Page]:
+    """
+    Generate a list of Page objects from a mdBook SUMMARY.md file.
+    
+    :param summary_path: Path to the SUMMARY.md file
+    :param strip_header: Remove the top level header from pages
+    :param remove_text_newlines: Remove single newlines in paragraphs
+    :param enable_relative_links: Extract and replace relative links
+    :return: A list of Page objects
+    """
+    summary_items = parse_summary_md(summary_path)
+    pages = []
+    
+    # First, add the SUMMARY.md itself as the first page (if it's a Part Title without a file)
+    # Find the first Part Title that doesn't have a path
+    summary_page_item = None
+    if summary_items and summary_items[0].is_part_title and not summary_items[0].path:
+        summary_page_item = summary_items[0]
+    
+    def generate_toc_for_item(item: SummaryItem, indent_level: int = 0) -> str:
+        """Generate table of contents markdown for an item and its children"""
+        toc_lines = []
+        indent = "  " * indent_level
+        
+        for child in item.children:
+            # Add the child as a list item
+            toc_lines.append(f"{indent}- {child.title}")
+            
+            # Recursively add nested children
+            if child.children:
+                nested_toc = generate_toc_for_item(child, indent_level + 1)
+                toc_lines.append(nested_toc)
+        
+        return "\n".join(toc_lines)
+    
+    def process_item(
+        item: SummaryItem,
+        parent_title: Optional[str] = None,
+        use_summary_content: bool = False
+    ) -> None:
+        """Recursively process summary items and create pages"""
+        
+        # Create page for this item
+        if item.is_separator:
+            return
+        
+        page_body = ""
+        page_file_path = None
+        page_attachments = []
+        page_relative_links = []
+        page_title = item.title
+        
+        # Special case: if this is the first Part Title without a path, use SUMMARY.md content
+        if use_summary_content and item == summary_page_item:
+            content_page = get_page_data_from_file_path(
+                summary_path,
+                strip_header=strip_header,
+                remove_text_newlines=remove_text_newlines,
+                enable_relative_links=enable_relative_links,
+            )
+            page_body = content_page.body
+            page_file_path = content_page.file_path
+            page_attachments = content_page.attachments
+            page_relative_links = content_page.relative_links
+            # Use SUMMARY.md title if available, otherwise use the Part Title from SUMMARY
+            if content_page.title:
+                page_title = content_page.title
+        # If item has a path, load content from the markdown file
+        elif item.path and item.path.exists():
+            content_page = get_page_data_from_file_path(
+                item.path,
+                strip_header=strip_header,
+                remove_text_newlines=remove_text_newlines,
+                enable_relative_links=enable_relative_links,
+            )
+            page_body = content_page.body
+            page_file_path = content_page.file_path
+            page_attachments = content_page.attachments
+            page_relative_links = content_page.relative_links
+            # Use document title if available, otherwise use SUMMARY.md title
+            if content_page.title:
+                page_title = content_page.title
+        elif item.is_part_title or not item.path:
+            # Part titles or draft chapters: generate TOC if they have children
+            if item.children:
+                toc_content = generate_toc_for_item(item)
+                # Parse the TOC markdown to Confluence format
+                page_body = parse_page([toc_content]).body
+            else:
+                # Empty page if no children
+                page_body = ""
+        
+        # Create the page
+        page = Page(
+            title=page_title,
+            parent_title=parent_title,
+            body=page_body,
+            file_path=page_file_path,
+            attachments=page_attachments,
+            relative_links=page_relative_links,
+        )
+        pages.append(page)
+        
+        # Process children recursively
+        for child in item.children:
+            process_item(child, parent_title=page_title, use_summary_content=False)
+    
+    # Process all top-level items
+    for item in summary_items:
+        # Use SUMMARY.md content for the first item if applicable
+        use_summary = (item == summary_page_item)
+        process_item(item, parent_title=None, use_summary_content=use_summary)
+    
+    return pages

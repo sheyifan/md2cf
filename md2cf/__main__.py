@@ -27,8 +27,14 @@ from md2cf.tui import Md2cfTUI
 from md2cf.upsert import upsert_attachment, upsert_page
 
 
-def get_parser():
+def get_base_parser():
+    """Get the base parser with common arguments"""
     parser = argparse.ArgumentParser(formatter_class=RichHelpFormatter)
+    return parser
+
+
+def add_common_arguments(parser):
+    """Add arguments common to all subcommands"""
     login_group = parser.add_argument_group("login arguments")
     login_group.add_argument(
         "-o",
@@ -258,7 +264,214 @@ def get_parser():
         help="number of retry attempts if any API call fails",
     )
 
+
+def get_parser():
+    """
+    Get the parser. For backward compatibility, this supports both:
+    1. Old style: md2cf [options] <files/dirs>
+    2. New style with subcommands: md2cf mdbook [options] <SUMMARY.md>
+    """
+    # Check if 'mdbook' is in the arguments to decide which parser to use
+    if len(sys.argv) > 1 and sys.argv[1] == 'mdbook':
+        # Use mdbook subcommand parser
+        parser = argparse.ArgumentParser(
+            prog='md2cf mdbook',
+            formatter_class=RichHelpFormatter,
+            description="Upload pages to Confluence based on mdBook SUMMARY.md structure"
+        )
+        add_mdbook_arguments(parser)
+        parser.set_defaults(command='mdbook')
+        # Remove 'mdbook' from argv so argparse doesn't see it as a positional arg
+        sys.argv.pop(1)
+    else:
+        # Use default parser (original behavior)
+        parser = argparse.ArgumentParser(
+            formatter_class=RichHelpFormatter,
+            description="Upload Markdown files to Confluence"
+        )
+        add_common_arguments(parser)
+        parser.set_defaults(command='default')
+    
     return parser
+
+
+def add_mdbook_arguments(parser):
+    """Add arguments specific to mdbook subcommand"""
+    # Login arguments
+    login_group = parser.add_argument_group("login arguments")
+    login_group.add_argument(
+        "-o",
+        "--host",
+        help="full URL of the Confluence instance. "
+        "Can also be specified as CONFLUENCE_HOST environment variable.",
+        default=os.getenv("CONFLUENCE_HOST"),
+    )
+    login_group.add_argument(
+        "-u",
+        "--username",
+        help="username for logging into Confluence. "
+        "Can also be specified as CONFLUENCE_USERNAME environment variable.",
+        default=os.getenv("CONFLUENCE_USERNAME"),
+    )
+    login_group.add_argument(
+        "-p",
+        "--password",
+        help="password for logging into Confluence. "
+        "Can also be specified as CONFLUENCE_PASSWORD environment variable. "
+        "If not specified, it will be asked for interactively.",
+        default=os.getenv("CONFLUENCE_PASSWORD"),
+    )
+    login_group.add_argument(
+        "--token",
+        help="personal access token for logging into Confluence. "
+        "Can also be specified as CONFLUENCE_TOKEN environment variable.",
+        default=os.getenv("CONFLUENCE_TOKEN"),
+    )
+    login_group.add_argument(
+        "--insecure",
+        action="store_true",
+        help="do not verify SSL certificates",
+    )
+
+    # Required arguments
+    required_group = parser.add_argument_group("required arguments")
+    required_group.add_argument(
+        "-s",
+        "--space",
+        help="key for the Confluence space the page will be published to. "
+        "Can also be specified as CONFLUENCE_SPACE environment variable.",
+        default=os.getenv("CONFLUENCE_SPACE"),
+    )
+
+    # Output arguments
+    output_group = parser.add_argument_group("md2cf output arguments")
+    output_group.add_argument(
+        "--output",
+        choices=["default", "minimal", "json"],
+        default="default",
+    )
+
+    # Page information arguments
+    page_group = parser.add_argument_group("page information arguments")
+    parent_group = page_group.add_mutually_exclusive_group()
+    parent_group.add_argument(
+        "-A",
+        "--parent-id",
+        help="ID of the parent page under which the top-level pages will be uploaded",
+    )
+    parent_group.add_argument(
+        "--top-level",
+        action="store_true",
+        help="upload the page tree starting from the top level (no top level parent)",
+    )
+
+    page_group.add_argument("-m", "--message", help="update message for the change")
+    page_group.add_argument(
+        "--minor-edit", action="store_true", help="do not notify watchers of change"
+    )
+    page_group.add_argument(
+        "--prefix",
+        help="a string to prefix to every page title to ensure uniqueness",
+        type=str,
+    )
+    page_group.add_argument(
+        "--strip-top-header",
+        action="store_true",
+        help="remove the top level header from the page",
+    )
+    page_group.add_argument(
+        "--remove-text-newlines",
+        action="store_true",
+        help="remove single newlines in paragraphs",
+    )
+    page_group.add_argument(
+        "--replace-all-labels",
+        action="store_true",
+        help="replace all labels instead of only adding new ones",
+    )
+
+    preface_group = page_group.add_mutually_exclusive_group()
+    preface_group.add_argument(
+        "--preface-markdown",
+        nargs="?",
+        type=str,
+        default=None,
+        const="**Contents are auto-generated, do not edit.**",
+        help="markdown content to prepend to each page. "
+        'Defaults to "**Contents are auto-generated, do not edit.**" '
+        "if no markdown is specified",
+    )
+    preface_group.add_argument(
+        "--preface-file",
+        type=Path,
+        help="path to a markdown file to be prepended to every page",
+    )
+
+    postface_group = page_group.add_mutually_exclusive_group()
+    postface_group.add_argument(
+        "--postface-markdown",
+        nargs="?",
+        type=str,
+        default=None,
+        const="**Contents are auto-generated, do not edit.**",
+        help="markdown content to append to each page. "
+        'Defaults to "**Contents are auto-generated, do not edit.**" '
+        "if no markdown is specified",
+    )
+    postface_group.add_argument(
+        "--postface-file",
+        type=Path,
+        help="path to a markdown file to be appended to every page",
+    )
+
+    # Relative links arguments
+    relative_links_group = parser.add_argument_group("relative links arguments")
+    relative_links_group.add_argument(
+        "--enable-relative-links",
+        action="store_true",
+        help="enable parsing of relative links to other markdown files. "
+        "Requires two passes for pages with relative links, and will cause them "
+        "to always be updated regardless of the --only-changed flag",
+    )
+    relative_links_group.add_argument(
+        "--ignore-relative-link-errors",
+        action="store_true",
+        help="when relative links are enabled and a link doesn't point to an "
+        "existing and uploaded file, leave the link as-is instead of exiting.",
+    )
+
+    # General arguments
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="print information on all the pages instead of uploading to Confluence",
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="print full stack traces for exceptions",
+    )
+    parser.add_argument(
+        "--only-changed",
+        action="store_true",
+        help="only upload pages and attachments that have changed. "
+        "This adds a hash of the page or attachment contents to the update message",
+    )
+    parser.add_argument(
+        "--max-retries",
+        action="store",
+        dest="max_retries",
+        type=int,
+        default=4,
+        help="number of retry attempts if any API call fails",
+    )
+    
+    # SUMMARY.md file path (required positional argument for mdbook subcommand)
+    parser.add_argument(
+        "summary_file",
+        type=Path,
+        help="path to the mdBook SUMMARY.md file",
+    )
 
 
 def print_missing_parameter(parameter_name: str):
@@ -308,14 +521,16 @@ def main():
         max_retries=args.max_retries,
     )
 
-    if (args.title or args.page_id) and (
-        len(args.file_list) > 1 or any(map(os.path.isdir, args.file_list))
-    ):
-        error_console.log(
-            ":x: Title and page ID cannot be specified on the command line "
-            "if uploading more than one file or whole directories\n"
-        )
-        sys.exit(1)
+    # Only check title and page_id for default command (not mdbook)
+    if hasattr(args, 'title') and hasattr(args, 'page_id') and hasattr(args, 'file_list'):
+        if (args.title or args.page_id) and (
+            len(args.file_list) > 1 or any(map(os.path.isdir, args.file_list))
+        ):
+            error_console.log(
+                ":x: Title and page ID cannot be specified on the command line "
+                "if uploading more than one file or whole directories\n"
+            )
+            sys.exit(1)
 
     pages_to_upload = collect_pages_to_upload(args)
 
@@ -497,29 +712,29 @@ def main():
 def pre_process_page(page, args, postface_markup, preface_markup, space_info):
     page.original_title = page.title
     page.space = args.space
-    page.page_id = args.page_id
-    page.content_type = args.content_type
+    page.page_id = getattr(args, 'page_id', None)
+    page.content_type = getattr(args, 'content_type', 'page')
 
     if page.parent_title is None:  # This only happens for top level pages
         # If the argument is not supplied this leaves
         # the parent_title as None, which is fine
-        page.parent_title = args.parent_title
+        page.parent_title = getattr(args, 'parent_title', None)
     else:
-        if args.prefix:
+        if getattr(args, 'prefix', None):
             page.parent_title = f"{args.prefix} - {page.parent_title}"
 
     if page.parent_title is None:
         page.parent_id = (
-            page.parent_id or args.parent_id
+            page.parent_id or getattr(args, 'parent_id', None)
         )  # This can still end up being None.
         # It's fine -- it means it's a top level page.
 
     # If we want to *move* a page back to the top space, we need to make it
     # a child of the space's home page
-    if args.top_level and page.parent_title is None and page.parent_id is None:
+    if getattr(args, 'top_level', False) and page.parent_title is None and page.parent_id is None:
         page.parent_id = space_info.homepage.id
 
-    if args.prefix:
+    if getattr(args, 'prefix', None):
         page.title = f"{args.prefix} - {page.title}"
 
     if preface_markup:
@@ -653,7 +868,33 @@ def update_pages_with_relative_links(
 
 def collect_pages_to_upload(args):
     pages_to_upload: List[Page] = list()
-    if not args.file_list:  # Uploading from standard input
+    
+    # Handle mdbook subcommand
+    if hasattr(args, 'command') and args.command == 'mdbook':
+        if not hasattr(args, 'summary_file'):
+            error_console.log("Error: mdbook subcommand requires SUMMARY.md file path\n")
+            sys.exit(1)
+        
+        summary_file = args.summary_file
+        if not summary_file.exists():
+            error_console.log(f"Error: SUMMARY.md file not found: {summary_file}\n")
+            sys.exit(1)
+        
+        if not summary_file.is_file():
+            error_console.log(f"Error: {summary_file} is not a file\n")
+            sys.exit(1)
+        
+        pages_to_upload = md2cf.document.get_pages_from_summary(
+            summary_file,
+            strip_header=args.strip_top_header,
+            remove_text_newlines=args.remove_text_newlines,
+            enable_relative_links=args.enable_relative_links,
+        )
+        
+        return pages_to_upload
+    
+    # Default behavior (original directory-based upload)
+    if not hasattr(args, 'file_list') or not args.file_list:  # Uploading from standard input
         pages_to_upload.append(
             md2cf.document.get_page_data_from_lines(
                 sys.stdin.readlines(),
@@ -663,14 +904,14 @@ def collect_pages_to_upload(args):
             )
         )
 
-        if not (pages_to_upload[0].title or args.title):
+        if not (pages_to_upload[0].title or getattr(args, 'title', None)):
             error_console.log(
                 "You must specify a title or have a title in the document "
                 "if uploading from standard input\n"
             )
             sys.exit(1)
 
-        if args.title:
+        if getattr(args, 'title', None):
             pages_to_upload[0].title = args.title
     else:
         for file_name in args.file_list:
@@ -706,7 +947,7 @@ def collect_pages_to_upload(args):
         if len(pages_to_upload) == 1:
             only_page = pages_to_upload[0]
 
-            if args.title:
+            if getattr(args, 'title', None):
                 only_page.title = args.title
 
             # This is implicitly only truthy if relative link processing is active
