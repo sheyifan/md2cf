@@ -595,9 +595,8 @@ def get_pages_from_summary(
             page_file_path = content_page.file_path
             page_attachments = content_page.attachments
             page_relative_links = content_page.relative_links
-            # Use document title if available, otherwise use SUMMARY.md title
-            if content_page.title:
-                page_title = content_page.title
+            # In mdbook mode, always use SUMMARY.md title (item.title)
+            # Do not override with content_page.title
         elif item.is_part_title or not item.path:
             # Part titles or draft chapters: generate TOC if they have children
             if item.children:
