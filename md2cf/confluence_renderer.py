@@ -60,7 +60,7 @@ class ConfluenceTag(object):
         self.children.append(child)
 
 
-class ConfluenceRenderer(mistune.Renderer):
+class ConfluenceRenderer(mistune.HTMLRenderer):
     def __init__(
         self,
         strip_header=False,
@@ -68,7 +68,9 @@ class ConfluenceRenderer(mistune.Renderer):
         enable_relative_links=False,
         **kwargs,
     ):
-        super().__init__(**kwargs)
+        # Remove mistune v2 specific parameters that v3 doesn't support
+        kwargs.pop('use_xhtml', None)
+        super().__init__()
         self.strip_header = strip_header
         self.remove_text_newlines = remove_text_newlines
         self.attachments = list()
@@ -81,14 +83,14 @@ class ConfluenceRenderer(mistune.Renderer):
         self.relative_links = list()
         self.title = None
 
-    def header(self, text, level, raw=None):
+    def heading(self, text, level, **attrs):
         if self.title is None and level == 1:
             self.title = text
             # Don't duplicate page title as a header
             if self.strip_header:
                 return ""
 
-        return super(ConfluenceRenderer, self).header(text, level, raw=raw)
+        return super().heading(text, level, **attrs)
 
     def structured_macro(self, name):
         return ConfluenceTag("structured-macro", attrib={"name": name})
@@ -103,7 +105,9 @@ class ConfluenceRenderer(mistune.Renderer):
         body_tag.text = text
         return body_tag
 
-    def link(self, link, title, text):
+    def link(self, text, url, title=None, **attrs):
+        # mistune v3 uses 'url' parameter instead of 'link'
+        link = url
         parsed_link = urlparse(link)
         
         # Define file extensions for different types
@@ -122,7 +126,8 @@ class ConfluenceRenderer(mistune.Renderer):
             # For images and videos, render as embedded media (like the image() method does)
             if any(path_lower.endswith(ext) for ext in image_extensions + video_extensions):
                 # Treat image/video links the same as ![](url) - embed them
-                return self.image(link, title, text)
+                # mistune v3: image(text, url, title=None)
+                return self.image(text, link, title)
             
             # For documents/archives, render as download links
             elif any(path_lower.endswith(ext) for ext in document_extensions):
@@ -159,11 +164,11 @@ class ConfluenceRenderer(mistune.Renderer):
                     replacement=replacement_link,
                     fragment=parsed_link.fragment,
                     original=link,
-                    escaped_original=mistune.escape_link(link),
+                    escaped_original=link.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;').replace('"', '&quot;'),
                 )
             )
             link = replacement_link
-        return super(ConfluenceRenderer, self).link(link, title, text)
+        return super().link(text, link, title, **attrs)
 
     def text(self, text):
         if self.remove_text_newlines:
@@ -171,7 +176,9 @@ class ConfluenceRenderer(mistune.Renderer):
 
         return super().text(text)
 
-    def block_code(self, code, lang=None):
+    def block_code(self, code, info=None, **attrs):
+        # mistune v3 uses 'info' parameter instead of 'lang'
+        lang = info
         root_element = self.structured_macro("code")
         if lang is not None:
             lang_parameter = self.parameter(name="language", value=lang)
@@ -180,7 +187,22 @@ class ConfluenceRenderer(mistune.Renderer):
         root_element.append(self.plain_text_body(code))
         return root_element.render()
 
-    def image(self, src, title, text):
+    def block_math(self, text):
+        """Render block math ($$...$$) as Confluence mathjax-block-macro"""
+        root_element = self.structured_macro("mathjax-block-macro")
+        root_element.append(self.plain_text_body(text.strip()))
+        return root_element.render()
+
+    def inline_math(self, text):
+        """Render inline math ($...$) as Confluence mathjax-inline-macro"""
+        root_element = self.structured_macro("mathjax-inline-macro")
+        # inline math uses 'equation' parameter instead of plain-text-body
+        root_element.append(self.parameter(name="equation", value=text.strip()))
+        return root_element.render()
+
+    def image(self, text, url, title=None, **attrs):
+        # mistune v3 uses 'url' parameter instead of 'src'
+        src = url
         attributes = {"alt": text}
         if title:
             attributes["title"] = title

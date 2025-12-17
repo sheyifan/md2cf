@@ -347,13 +347,17 @@ def parse_page(
     remove_text_newlines: bool = False,
     enable_relative_links: bool = False,
 ) -> Page:
+    from mistune.plugins.math import math
+    from mistune.plugins.table import table
+    
     renderer = ConfluenceRenderer(
         use_xhtml=True,
         strip_header=strip_header,
         remove_text_newlines=remove_text_newlines,
         enable_relative_links=enable_relative_links,
     )
-    confluence_mistune = mistune.Markdown(renderer=renderer)
+    # Enable plugins: math for LaTeX formulas, table for markdown tables (mistune v3)
+    confluence_mistune = mistune.create_markdown(renderer=renderer, plugins=[math, table])
     confluence_content = confluence_mistune("".join(markdown_lines))
 
     page = Page(
