@@ -357,3 +357,135 @@ def test_renderer_relative_link_with_fragment_disabled():
         == '<a href="document/../path/page.md#header-name">relative link</a>'
     )
     assert renderer.relative_links == []
+
+
+def test_renderer_attachment_link_pdf():
+    test_attachment_file = "manual.pdf"
+    test_attachment_src = "docs/" + test_attachment_file
+    test_link_text = "User Manual"
+    test_link_markup = (
+        '<ac:link><ri:attachment ri:filename="{}"></ri:attachment>\n'
+        '<ac:plain-text-link-body><![CDATA[{}]]></ac:plain-text-link-body>\n'
+        "</ac:link>\n".format(test_attachment_file, test_link_text)
+    )
+
+    renderer = ConfluenceRenderer()
+
+    assert (
+        renderer.link(test_attachment_src, None, test_link_text) == test_link_markup
+    )
+    assert renderer.attachments == [test_attachment_src]
+
+
+def test_renderer_attachment_link_pptx():
+    test_attachment_file = "presentation.pptx"
+    test_attachment_src = "slides/" + test_attachment_file
+    test_link_text = "Project Presentation"
+    test_link_markup = (
+        '<ac:link><ri:attachment ri:filename="{}"></ri:attachment>\n'
+        '<ac:plain-text-link-body><![CDATA[{}]]></ac:plain-text-link-body>\n'
+        "</ac:link>\n".format(test_attachment_file, test_link_text)
+    )
+
+    renderer = ConfluenceRenderer()
+
+    assert (
+        renderer.link(test_attachment_src, None, test_link_text) == test_link_markup
+    )
+    assert renderer.attachments == [test_attachment_src]
+
+
+def test_renderer_attachment_link_docx():
+    test_attachment_file = "requirements.docx"
+    test_attachment_src = "documents/" + test_attachment_file
+    test_link_text = "Requirements Document"
+    test_link_markup = (
+        '<ac:link><ri:attachment ri:filename="{}"></ri:attachment>\n'
+        '<ac:plain-text-link-body><![CDATA[{}]]></ac:plain-text-link-body>\n'
+        "</ac:link>\n".format(test_attachment_file, test_link_text)
+    )
+
+    renderer = ConfluenceRenderer()
+
+    assert (
+        renderer.link(test_attachment_src, None, test_link_text) == test_link_markup
+    )
+    assert renderer.attachments == [test_attachment_src]
+
+
+def test_renderer_attachment_link_xlsx():
+    test_attachment_file = "data.xlsx"
+    test_attachment_src = "spreadsheets/" + test_attachment_file
+    test_link_text = "Data Analysis"
+    test_link_markup = (
+        '<ac:link><ri:attachment ri:filename="{}"></ri:attachment>\n'
+        '<ac:plain-text-link-body><![CDATA[{}]]></ac:plain-text-link-body>\n'
+        "</ac:link>\n".format(test_attachment_file, test_link_text)
+    )
+
+    renderer = ConfluenceRenderer()
+
+    assert (
+        renderer.link(test_attachment_src, None, test_link_text) == test_link_markup
+    )
+    assert renderer.attachments == [test_attachment_src]
+
+
+def test_renderer_attachment_link_zip():
+    test_attachment_file = "source.zip"
+    test_attachment_src = "archives/" + test_attachment_file
+    test_link_text = "Source Code"
+    test_link_markup = (
+        '<ac:link><ri:attachment ri:filename="{}"></ri:attachment>\n'
+        '<ac:plain-text-link-body><![CDATA[{}]]></ac:plain-text-link-body>\n'
+        "</ac:link>\n".format(test_attachment_file, test_link_text)
+    )
+
+    renderer = ConfluenceRenderer()
+
+    assert (
+        renderer.link(test_attachment_src, None, test_link_text) == test_link_markup
+    )
+    assert renderer.attachments == [test_attachment_src]
+
+
+def test_renderer_attachment_link_without_text():
+    test_attachment_file = "manual.pdf"
+    test_attachment_src = "docs/" + test_attachment_file
+    test_link_markup = (
+        '<ac:link><ri:attachment ri:filename="{}"></ri:attachment>\n'
+        '<ac:plain-text-link-body><![CDATA[{}]]></ac:plain-text-link-body>\n'
+        "</ac:link>\n".format(test_attachment_file, test_attachment_file)
+    )
+
+    renderer = ConfluenceRenderer()
+
+    assert renderer.link(test_attachment_src, None, "") == test_link_markup
+    assert renderer.attachments == [test_attachment_src]
+
+
+def test_renderer_external_link_not_attachment():
+    test_link_url = "http://example.com"
+    test_link_text = "External Link"
+
+    renderer = ConfluenceRenderer()
+
+    result = renderer.link(test_link_url, None, test_link_text)
+
+    # Should return normal HTML link, not attachment
+    assert '<a href="' in result
+    assert renderer.attachments == []
+
+
+def test_renderer_relative_markdown_link_not_attachment():
+    test_link_url = "other_page.md"
+    test_link_text = "Another Page"
+
+    renderer = ConfluenceRenderer(enable_relative_links=True)
+
+    result = renderer.link(test_link_url, None, test_link_text)
+
+    # Should be processed as relative link, not attachment
+    assert "md2cf-internal-link-" in result
+    assert renderer.attachments == []
+    assert len(renderer.relative_links) == 1

@@ -105,12 +105,43 @@ class ConfluenceRenderer(mistune.Renderer):
 
     def link(self, link, title, text):
         parsed_link = urlparse(link)
+        
+        # Define file extensions that should be uploaded as attachments
+        attachment_extensions = (
+            '.pdf', '.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls',
+            '.zip', '.tar', '.gz', '.7z', '.rar',
+            '.txt', '.csv', '.json', '.xml',
+        )
+        
+        # Check if this is a local file that should be uploaded as attachment
+        if (not parsed_link.scheme and not parsed_link.netloc) and parsed_link.path:
+            path_lower = parsed_link.path.lower()
+            if any(path_lower.endswith(ext) for ext in attachment_extensions):
+                # This is a local attachment file - render as Confluence attachment link
+                basename = Path(unquote(parsed_link.path)).name
+                self.attachments.append(unquote(parsed_link.path))
+                
+                # Create attachment link structure
+                link_tag = ConfluenceTag(name="link")
+                attachment_tag = ConfluenceTag(
+                    "attachment", attrib={"filename": basename}, namespace="ri"
+                )
+                link_tag.append(attachment_tag)
+                
+                # Add link body (the link text)
+                link_body_tag = ConfluenceTag("plain-text-link-body", cdata=True)
+                link_body_tag.text = text if text else basename
+                link_tag.append(link_body_tag)
+                
+                return link_tag.render()
+        
+        # Check if this is a relative markdown link (for --enable-relative-links)
         if (
             self.enable_relative_links
             and (not parsed_link.scheme and not parsed_link.netloc)
             and parsed_link.path
         ):
-            # relative link
+            # relative link to another page
             replacement_link = f"md2cf-internal-link-{uuid.uuid4()}"
             self.relative_links.append(
                 RelativeLink(
