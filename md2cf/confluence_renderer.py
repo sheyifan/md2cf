@@ -106,18 +106,26 @@ class ConfluenceRenderer(mistune.Renderer):
     def link(self, link, title, text):
         parsed_link = urlparse(link)
         
-        # Define file extensions that should be uploaded as attachments
-        attachment_extensions = (
+        # Define file extensions for different types
+        image_extensions = ('.png', '.jpg', '.jpeg', '.gif', '.svg', '.bmp', '.webp')
+        video_extensions = ('.mp4', '.webm', '.avi', '.mov', '.wmv')
+        document_extensions = (
             '.pdf', '.pptx', '.ppt', '.docx', '.doc', '.xlsx', '.xls',
             '.zip', '.tar', '.gz', '.7z', '.rar',
-            '.txt', '.csv', '.json', '.xml',
+            '.txt', '.csv', '.json', '.xml'
         )
         
         # Check if this is a local file that should be uploaded as attachment
         if (not parsed_link.scheme and not parsed_link.netloc) and parsed_link.path:
             path_lower = parsed_link.path.lower()
-            if any(path_lower.endswith(ext) for ext in attachment_extensions):
-                # This is a local attachment file - render as Confluence attachment link
+            
+            # For images and videos, render as embedded media (like the image() method does)
+            if any(path_lower.endswith(ext) for ext in image_extensions + video_extensions):
+                # Treat image/video links the same as ![](url) - embed them
+                return self.image(link, title, text)
+            
+            # For documents/archives, render as download links
+            elif any(path_lower.endswith(ext) for ext in document_extensions):
                 basename = Path(unquote(parsed_link.path)).name
                 self.attachments.append(unquote(parsed_link.path))
                 
