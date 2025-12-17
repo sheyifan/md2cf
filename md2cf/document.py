@@ -350,12 +350,15 @@ def parse_page(
     from mistune.plugins.math import math
     from mistune.plugins.table import table
     
+    # Create renderer with escape=False to allow HTML passthrough
     renderer = ConfluenceRenderer(
         use_xhtml=True,
         strip_header=strip_header,
         remove_text_newlines=remove_text_newlines,
         enable_relative_links=enable_relative_links,
     )
+    renderer._escape = False  # Disable HTML escaping in renderer
+    
     # Enable plugins: math for LaTeX formulas, table for markdown tables (mistune v3)
     confluence_mistune = mistune.create_markdown(renderer=renderer, plugins=[math, table])
     confluence_content = confluence_mistune("".join(markdown_lines))
