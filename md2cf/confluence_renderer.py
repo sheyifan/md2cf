@@ -179,6 +179,14 @@ class ConfluenceRenderer(mistune.HTMLRenderer):
     def block_code(self, code, info=None, **attrs):
         # mistune v3 uses 'info' parameter instead of 'lang'
         lang = info
+
+        # PlantUML code blocks are rendered as Confluence plantuml macro
+        if lang == "plantuml":
+            root_element = self.structured_macro("plantuml")
+            root_element.append(self.parameter(name="atlassian-macro-output-type", value="INLINE"))
+            root_element.append(self.plain_text_body(code))
+            return root_element.render()
+
         root_element = self.structured_macro("code")
         if lang is not None:
             lang_parameter = self.parameter(name="language", value=lang)
